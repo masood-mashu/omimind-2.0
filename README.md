@@ -45,7 +45,7 @@ The demo uses labeled sample data. It does not read or expose another account’
 
    > We decided to launch the beta on October 30. I will send the onboarding checklist by Thursday. If the support documents are not ready, we will delay customer invites.
 
-3. Open **Meetings** and select **Analyze with Lyzr**. Review the summary, decision, and extracted action item.
+3. Open **Meetings** and select **Analyze with Lyzr**. Review the summary, decisions, and any action items supported by the transcript.
 4. Open **Ask your memory** and try:
 
    - “When did we decide to launch the beta?”
@@ -55,6 +55,8 @@ The demo uses labeled sample data. It does not read or expose another account’
 5. Ask something absent from the transcript, such as “What color was the office?” OMIMIND should say it could not find that information instead of inventing an answer.
 
 Each account starts with its own private memory. A new account will not contain another account’s conversations; capture or connect a conversation in that account before testing live recall.
+
+For the current account flow, Supabase Auth email confirmation is disabled: account creation returns the user to the sign-in form, where they enter the same email and password. If you enable email confirmation in your own Supabase project, configure email delivery and expect users to confirm their address before signing in.
 
 ## Connect the Omi mobile app
 
@@ -80,7 +82,7 @@ The webhook URL is signed for one Supabase user ID. The ID is covered by an HMAC
 - **Overview:** recent meetings, open action items, memory moments, and integration status.
 - **Meetings:** conversation archive and Lyzr meeting analysis.
 - **Action items:** commitments captured from Omi or extracted during analysis.
-- **Memory:** searchable transcript moments stored in Qdrant.
+- **Memory stream:** timeline of transcript moments stored in Qdrant. Use **Ask your memory** to search them semantically.
 - **Live capture:** browser speech recognition or paste-in transcript ingestion.
 - **Ask your memory:** semantic retrieval followed by a grounded Lyzr answer with supporting meeting context.
 - **Settings:** account-specific Omi URLs and Omi, Qdrant, and Lyzr connection status.
@@ -89,7 +91,7 @@ The webhook URL is signed for one Supabase user ID. The ID is covered by an HMAC
 
 For a question, FastAPI embeds the query, searches Qdrant using the authenticated account’s `uid` filter, and sends the matching transcript passages to the configured Lyzr agent. The prompt tells Lyzr to answer only from supplied meeting context, cite the meeting or speaker, and say when the context does not contain the answer. If Lyzr is unavailable or unconfigured, the API returns an error instead of substituting a mock answer.
 
-Meeting analysis retrieves the selected meeting from the same account, asks Lyzr for a summary, decisions, and explicitly supported action items, then stores those results back under that account. Transcript contents are treated as untrusted data in the Lyzr instructions.
+For ordinary questions, the Lyzr manager can route work to the Memory Recall specialist and returns a natural-language answer. Meeting analysis retrieves the selected meeting from the same account, asks Lyzr for a summary, decisions, and explicitly supported action items, then stores those results back under that account. When managed agents are configured, the manager coordinates the analyst and action-extraction specialists. Structured JSON is used internally for analysis results because the backend validates and stores those fields; ordinary answers should be prose. Transcript contents are treated as untrusted data in the Lyzr instructions.
 
 ## Run locally
 
@@ -134,6 +136,8 @@ The first embedding request downloads `BAAI/bge-small-en-v1.5` through FastEmbed
 
 5. Open the Vite URL printed in the terminal. The development proxy forwards `/api` and `/health` requests to `http://127.0.0.1:8000`.
 
+For immediate email-and-password sign-in after account creation, turn off **Confirm email** under the Supabase project's Auth settings. If it remains enabled, configure SMTP and have users confirm their email before signing in.
+
 Leave `QDRANT_URL` blank to use local storage at `QDRANT_PATH`. Local Qdrant data is for development; use Qdrant Cloud for deployed workspaces so memories survive instance replacement.
 
 ## Configuration
@@ -166,7 +170,7 @@ The current deployment layout separates the React frontend from the FastAPI back
 1. Import the repository into Replit and use the included `.replit` deployment configuration.
 2. Add the required backend variables from the table above in **Secrets**. Use Qdrant Cloud for durable deployed memory.
 3. Set `ALLOWED_ORIGINS` to the exact deployed frontend origin, such as `https://your-project.vercel.app`.
-4. Deploy/restart the backend and check `https://YOUR_BACKEND_HOST/health`. Confirm `status` is `ok`, `qdrant` is `connected`, and `auth_configured` and `lyzr_configured` are true. `omi_configured` should be true when `OMI_WEBHOOK_TOKEN` is set.
+4. Deploy/restart the backend and check `https://YOUR_BACKEND_HOST/health`. The response reports app startup and integration configuration: `status` should be `ok`; `qdrant` should be `connected`; and `auth_configured` and `lyzr_configured` should be true. `omi_configured` should be true when `OMI_WEBHOOK_TOKEN` is set. These flags do not prove a live Qdrant query or Lyzr inference succeeds; complete a signed-in Ask request to verify the full path.
 
 ### Frontend on Vercel
 
@@ -210,9 +214,19 @@ Vite embeds `VITE_API_BASE_URL` at build time. Redeploy the frontend after chang
 - Supabase access tokens are verified by the backend before user-specific API access. The server derives the Qdrant filter UID from the verified account, not a caller-supplied query parameter.
 - Omi webhooks use account-bound signed URLs because Omi calls the backend without the user’s browser session. Each OMIMIND account must configure its own URLs in Omi.
 - The read-only demo is sample content. It is separate from private Qdrant memories.
-- Browser speech recognition may use the browser’s speech service. OMIMIND stores the resulting transcript, not browser microphone audio.
+- Browser dictation depends on the browser’s speech-recognition service and may fail on some networks. OMIMIND stores the resulting transcript, not browser microphone audio; Omi mobile webhooks and pasted transcripts are alternatives.
 - Action-item completion toggles are saved in the current browser, scoped to the signed-in account; they are not yet synchronized across devices.
 - Local embedded Qdrant storage may be ephemeral on hosted platforms. Use Qdrant Cloud for a persistent evaluation deployment.
+
+## Future scope
+
+These are possible next steps, not features currently available in the app:
+
+- Sync action-item completion across devices and sessions.
+- Add richer memory search filters for meeting, date, speaker, and source.
+- Add webhook delivery diagnostics, retry handling, and stronger duplicate-event handling.
+- Add user-controlled transcript export, retention, and deletion tools.
+- Add optional calendar or task-system export for extracted commitments.
 
 ## Project structure
 
