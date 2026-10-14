@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "fastapi",
+  "installCommand": "npm ci --prefix frontend",
+  "buildCommand": "npm run build --prefix frontend",
+  "functions": {
+    "app.py": {
+      "includeFiles": "frontend/dist/**",
+      "maxDuration": 120
+    }
+  }
+}
