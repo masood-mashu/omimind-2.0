@@ -40,6 +40,8 @@ The demo uses labeled sample data. It does not read or expose another account’
 
 ### Option B: Test a real private workspace
 
+# You can use this credentials as this has some memories - masoodmashu823@gmail.com, pass: Test@123
+
 1. On the live app, create an account with an email address and password, then sign in.
 2. Open **Live capture**. Paste this sample transcript and choose **Save to meeting memory**:
 
