@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Live app** | [omimind-2-0-masood-mashus-projects.vercel.app](https://omimind-2-0-masood-mashus-projects.vercel.app/) |
+| **Live app** | [omimind.vercel.app](https://omimind.vercel.app/) |
 | **Source** | [masood-mashu/omimind-2.0](https://github.com/masood-mashu/omimind-2.0) |
 | **Hackathon** | [HiDevs: Stop Prompting, Solo Agents](https://app.hidevs.xyz/hackathons/stop-prompting-solo-agents-hackathon-2026) |
 
@@ -32,7 +32,7 @@ You can explore the interface without setting up any integrations, or create an 
 
 ### Option A: Explore the sample interface
 
-1. Open the [live app](https://omimind-2-0-masood-mashus-projects.vercel.app/).
+1. Open the [live app](https://omimind.vercel.app/).
 2. Choose **Explore the read-only demo**.
 3. Review the sample Overview, Meetings, Action Items, and Memory screens.
 
