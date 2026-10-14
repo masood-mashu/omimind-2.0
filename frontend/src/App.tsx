@@ -98,7 +98,6 @@ function App() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [showSettings, setShowSettings] = useState(false);
-  const [showAllMemories, setShowAllMemories] = useState(false);
   const [omiWebhookUrls, setOmiWebhookUrls] = useState<OmiWebhookUrls | null>(null);
   const [omiWebhookLoading, setOmiWebhookLoading] = useState(false);
   const [omiWebhookError, setOmiWebhookError] = useState('');
@@ -112,7 +111,7 @@ function App() {
   const taskCount = actions.filter((action) => !action.done).length;
   const userMark = demoMode ? 'DM' : uid.slice(0, 2).toUpperCase() || 'OM';
   const recentMeetings = useMemo(() => (connected ? meetings : sampleMeetings).slice(0, 3), [connected, meetings]);
-  const visibleMemories = useMemo(() => (showAllMemories ? memories : memories.slice(0, 3)), [memories, showAllMemories]);
+  const visibleMemories = useMemo(() => memories.slice(0, 3), [memories]);
 
   useEffect(() => {
     let alive = true;
@@ -239,11 +238,11 @@ function App() {
     setAuthMessage('');
     try {
       if (authMode === 'signUp') {
-        const hasSession = await signUp(authEmail.trim(), authPassword);
-        if (!hasSession) {
-          setAuthMessage('Account created. Check your email to confirm it, then sign in.');
-          return;
-        }
+        await signUp(authEmail.trim(), authPassword);
+        setAuthMode('signIn');
+        setAuthPassword('');
+        setAuthMessage('Account created. Sign in with the email and password you just entered.');
+        return;
       } else {
         await signIn(authEmail.trim(), authPassword);
       }
@@ -311,7 +310,14 @@ function App() {
       if (newText.length) setCaptureTranscript((current) => `${current}${current.trim() ? ' ' : ''}${newText.join(' ').trim()}`.slice(0, 50000));
     };
     next.onerror = (event) => {
-      setCaptureError(event.error === 'not-allowed' ? 'Microphone access was blocked. Allow microphone access and try again.' : `Speech capture stopped (${event.error}).`);
+      const messages: Record<string, string> = {
+        'not-allowed': 'Microphone access was blocked. Allow microphone access for this site, then try again.',
+        'audio-capture': 'No usable microphone was found. Check your microphone connection and browser permission.',
+        network: 'Your browser could not reach its speech-to-text service. This does not affect Omi mobile; use your Omi app or paste a transcript here.',
+        'service-not-allowed': 'This browser does not allow its speech-to-text service. Use your Omi app or paste a transcript here.',
+        'no-speech': 'No speech was detected. Check the microphone input and try again.',
+      };
+      setCaptureError(messages[event.error] ?? `Speech capture stopped (${event.error}). Use your Omi app or paste a transcript here.`);
       setCaptureActive(false);
     };
     next.onend = () => setCaptureActive(false);
@@ -374,6 +380,7 @@ function App() {
     { label: 'Overview', icon: 'grid' },
     { label: 'Live capture', icon: 'mic' },
     { label: 'Meetings', icon: 'calendar', count: String(meetingCount).padStart(2, '0') },
+    { label: 'Memory stream', icon: 'activity', count: String(memoryCount).padStart(2, '0') },
     { label: 'Action items', icon: 'check', count: String(taskCount).padStart(2, '0') },
     { label: 'Ask your memory', icon: 'spark' },
   ];
@@ -511,18 +518,22 @@ function App() {
               </article>
 
               <article className="panel memory-panel">
-                <div className="panel-heading compact-heading"><div className="heading-icon memory-icon"><Icon name="activity" size={17} /></div><div><h2>Memory stream</h2><p>Small moments, easy to find.</p></div><button className="more-button" aria-label="Show all memories" onClick={() => setShowAllMemories((value) => !value)}>···</button></div>
+                <div className="panel-heading compact-heading"><div className="heading-icon memory-icon"><Icon name="activity" size={17} /></div><div><h2>Memory stream</h2><p>Small moments, easy to find.</p></div><button className="more-button" aria-label="Explore memory stream" onClick={() => { setActive('Memory stream'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>···</button></div>
                 <div className="memory-feed">
                   {visibleMemories.map((memory, index) => <div className="memory-item" key={memory.id}>
                     <span className={`memory-dot dot-${index % 3}`} /><div className="memory-item-body"><p>“{memory.text}”</p><div><strong>{memory.speaker}</strong><span>·</span><span>{shortDate(memory.created_at)}</span><button onClick={() => { setQuery(`What was said about: ${memory.text.slice(0, 52)}`); setActive('Ask your memory'); }}>Ask <Icon name="arrow" size={12} /></button></div></div>
                   </div>)}
                 </div>
-                <button className="panel-footer-button" onClick={() => setShowAllMemories((value) => !value)}>{showAllMemories ? 'Show less' : 'Explore memory'} <Icon name="arrow" size={14} /></button>
+                <button className="panel-footer-button" onClick={() => { setActive('Memory stream'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Explore memory <Icon name="arrow" size={14} /></button>
               </article>
             </aside>
           </section>
 
           {active !== 'Overview' && <section className="panel alternate-page">
+            {active === 'Memory stream' && <>
+              <div className="alternate-heading"><div><span className="eyebrow">YOUR PRIVATE CONVERSATION MEMORY</span><h1>Memory stream</h1><p>Transcript moments saved from your Omi conversations.</p></div><span className="count-badge">{(liveData ? memories.length : demoMode ? sampleMemories.length : 0).toLocaleString()} MOMENTS</span></div>
+              <div className="alternate-memories memory-page-feed">{(liveData ? memories : demoMode ? sampleMemories : []).length ? (liveData ? memories : sampleMemories).map((memory, index) => <div className="alternate-memory" key={memory.id}><span className={`memory-dot dot-${index % 3}`} /><p>“{memory.text}”</p><div className="memory-page-meta"><small>{memory.speaker} · {shortDate(memory.created_at)}</small><button className="memory-ask-button" onClick={() => { setQuery(`What was said about: ${memory.text.slice(0, 52)}`); setActive('Ask your memory'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>Ask <Icon name="arrow" size={12} /></button></div></div>) : <div className="empty-inline">No memory moments yet. Connect Omi or save a transcript to build this user’s private memory.</div>}</div>
+            </>}
             {active === 'Meetings' && <>
               <div className="alternate-heading"><div><span className="eyebrow">YOUR CONVERSATION ARCHIVE</span><h1>Meetings</h1><p>Searchable context from the things you’ve talked through.</p></div><button className="button button-primary" onClick={() => setShowSettings(true)}><Icon name="mic" size={16} /> Connect Omi</button></div>
               <div className="alternate-list">
@@ -546,7 +557,7 @@ function App() {
                 <textarea id="capture-transcript" value={captureTranscript} onChange={(event) => setCaptureTranscript(event.target.value)} maxLength={50000} rows={10} placeholder="Start live capture, or paste a transcript here…" />
                 <div className="capture-footer"><span>{captureTranscript.length.toLocaleString()} / 50,000 characters</span><button className="button button-primary" disabled={demoMode || busy || !captureTranscript.trim()}><Icon name="check" size={15} /> {busy ? 'Saving…' : 'Save to meeting memory'}</button></div>
                 {captureError && <div className="inline-error" role="alert">{captureError}</div>}
-                <p className="capture-privacy">Browser speech recognition may be processed by your browser’s speech service. For Omi wearable capture, configure the Omi webhook in Settings.</p>
+                <p className="capture-privacy">Browser dictation depends on your browser’s speech service and may be unavailable on some networks. Omi mobile capture works separately through the webhook in Settings. You can also paste a transcript here.</p>
               </form>
             </>}
             {active === 'Action items' && <>

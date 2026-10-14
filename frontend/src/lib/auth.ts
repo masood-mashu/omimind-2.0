@@ -71,9 +71,21 @@ export async function signIn(email: string, password: string): Promise<void> {
   if (!storeSession(result)) throw new Error('Supabase did not return an active session.');
 }
 
-export async function signUp(email: string, password: string): Promise<boolean> {
+export async function signUp(email: string, password: string): Promise<void> {
   const result = await authRequest('signup', { email, password });
-  return storeSession(result) !== null;
+  // Supabase may return a session when email confirmation is disabled. End it
+  // immediately so signup always leads to an explicit sign-in step.
+  if (result.access_token) {
+    const config = await getConfig();
+    await fetch(`${config.supabase_url}/auth/v1/logout`, {
+      method: 'POST',
+      headers: {
+        apikey: config.publishable_key,
+        Authorization: `Bearer ${result.access_token}`,
+      },
+    }).catch(() => undefined);
+  }
+  clearSession();
 }
 
 export async function signOut(): Promise<void> {
