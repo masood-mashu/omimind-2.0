@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { api, type ActionItem, type AskResult, type Health, type Meeting, type MeetingAnalysis, type Memory, shortDate } from './lib/api';
+import { api, type ActionItem, type AskResult, type Health, type Meeting, type MeetingAnalysis, type Memory, type OmiWebhookUrls, shortDate } from './lib/api';
 import { signIn, signOut, signUp } from './lib/auth';
 import './auth.css';
 
@@ -60,6 +60,15 @@ const sampleActions: (ActionItem & { done: boolean })[] = [
   { id: 'sample-action-3', text: 'Review the launch checklist', owner: 'Jordan Lee', due_date: 'Oct 17', created_at: Date.now() / 1000, session_id: 'sample-03', done: true },
 ];
 
+function readCompletedActions(userId: string): string[] {
+  if (!userId) return ['sample-action-3'];
+  try {
+    return JSON.parse(localStorage.getItem(`omimind.completed.${userId}`) ?? '[]') as string[];
+  } catch {
+    return [];
+  }
+}
+
 function App() {
   const [active, setActive] = useState('Overview');
   const [health, setHealth] = useState<Health | null>(null);
@@ -90,13 +99,10 @@ function App() {
   const [toast, setToast] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [showAllMemories, setShowAllMemories] = useState(false);
-  const [completedActions, setCompletedActions] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('omimind.completed') ?? '["sample-action-3"]') as string[];
-    } catch {
-      return ['sample-action-3'];
-    }
-  });
+  const [omiWebhookUrls, setOmiWebhookUrls] = useState<OmiWebhookUrls | null>(null);
+  const [omiWebhookLoading, setOmiWebhookLoading] = useState(false);
+  const [omiWebhookError, setOmiWebhookError] = useState('');
+  const [completedActions, setCompletedActions] = useState<string[]>(['sample-action-3']);
 
   const connected = health?.status === 'ok';
   const liveData = connected && !demoMode;
@@ -119,7 +125,10 @@ function App() {
     };
     window.addEventListener('omimind:auth-expired', onAuthExpired);
     api.me().then(({ uid: verifiedUid }) => {
-      if (alive) setUid(verifiedUid);
+      if (alive) {
+        setCompletedActions(readCompletedActions(verifiedUid));
+        setUid(verifiedUid);
+      }
     }).catch(() => {
       if (alive) setUid('');
     }).finally(() => {
@@ -136,8 +145,24 @@ function App() {
   }, [demoMode]);
 
   useEffect(() => {
-    localStorage.setItem('omimind.completed', JSON.stringify(completedActions));
-  }, [completedActions]);
+    if (!showSettings || demoMode || !uid) return;
+    let alive = true;
+    setOmiWebhookUrls(null);
+    setOmiWebhookLoading(true);
+    setOmiWebhookError('');
+    api.omiWebhookUrls().then((urls) => {
+      if (alive) setOmiWebhookUrls(urls);
+    }).catch((cause) => {
+      if (alive) setOmiWebhookError(cause instanceof Error ? cause.message : 'Could not create Omi webhook URLs.');
+    }).finally(() => {
+      if (alive) setOmiWebhookLoading(false);
+    });
+    return () => { alive = false; };
+  }, [showSettings, demoMode, uid]);
+
+  useEffect(() => {
+    if (uid) localStorage.setItem(`omimind.completed.${uid}`, JSON.stringify(completedActions));
+  }, [completedActions, uid]);
 
   useEffect(() => {
     let alive = true;
@@ -223,6 +248,13 @@ function App() {
         await signIn(authEmail.trim(), authPassword);
       }
       const { uid: verifiedUid } = await api.me();
+      setHealth(null);
+      setMeetings(sampleMeetings);
+      setMemories(sampleMemories);
+      setActualActions([]);
+      setAnswer(null);
+      setMeetingAnalysis(null);
+      setCompletedActions(readCompletedActions(verifiedUid));
       setUid(verifiedUid);
       setAuthPassword('');
     } catch (cause) {
@@ -235,9 +267,22 @@ function App() {
   async function leaveWorkspace() {
     await signOut();
     setUid('');
+    setHealth(null);
+    setMeetings(sampleMeetings);
+    setMemories(sampleMemories);
     setAnswer(null);
     setMeetingAnalysis(null);
     setActualActions([]);
+    setCompletedActions(['sample-action-3']);
+  }
+
+  async function copyWebhookUrl(value: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setToast(`${label} URL copied`);
+    } catch {
+      setOmiWebhookError('Clipboard access was blocked. Select and copy the URL manually.');
+    }
   }
 
   function toggleCapture() {
@@ -303,6 +348,10 @@ function App() {
   }
 
   async function analyzeMeeting(meeting: Meeting) {
+    if (demoMode) {
+      setAnalysisError('Sign in to analyze meetings from your private workspace.');
+      return;
+    }
     setAnalyzingMeeting(meeting.session_id);
     setAnalysisError('');
     try {
@@ -426,7 +475,7 @@ function App() {
                   <label className="visually-hidden" htmlFor="memory-question">Ask something from your meetings</label>
                   <Icon name="search" size={18} />
                   <input id="memory-question" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ask anything from your meetings…" />
-                  <button aria-label="Ask OMIMIND" disabled={busy || !query.trim()}><Icon name="send" size={16} /></button>
+                  <button aria-label="Ask OMIMIND" disabled={demoMode || busy || !query.trim()}><Icon name="send" size={16} /></button>
                 </form>
                 <div className="suggestions"><span>TRY</span><button onClick={() => setQuery('What are my open action items?')}>My open action items</button><button onClick={() => setQuery('What did the team decide last week?')}>Decisions from last week</button><button onClick={() => setQuery('What did Maya say she would do?')}>What Maya committed to</button></div>
                 {busy && <div className="answer-state"><span className="loader" /> Searching your meeting memory and asking Lyzr…</div>}
@@ -481,7 +530,7 @@ function App() {
                   <button className="meeting-row" onClick={() => { setQuery(`Summarize ${meeting.title}`); setActive('Ask your memory'); }}>
                     <div className={`meeting-art art-${index + 1}`}><span>{index === 0 ? 'PD' : index === 1 ? 'CD' : 'MP'}</span><i /></div><div className="meeting-info"><strong>{meeting.title}</strong><span>{meeting.preview || `${meeting.segment_count} conversation moments captured`}</span></div><div className="meeting-meta"><span><Icon name="clock" size={13} /> {shortDate(meeting.updated_at)}</span><small>{meeting.segment_count} moments</small></div><Icon name="chevron" size={16} />
                   </button>
-                  <button className="meeting-analyze" disabled={!connected || !health?.lyzr_configured || Boolean(analyzingMeeting)} onClick={() => void analyzeMeeting(meeting)}><Icon name="spark" size={14} />{analyzingMeeting === meeting.session_id ? 'Analyzing…' : 'Analyze with Lyzr'}</button>
+                  <button className="meeting-analyze" disabled={demoMode || !connected || !health?.lyzr_configured || Boolean(analyzingMeeting)} onClick={() => void analyzeMeeting(meeting)}><Icon name="spark" size={14} />{analyzingMeeting === meeting.session_id ? 'Analyzing…' : 'Analyze with Lyzr'}</button>
                 </div>) : <div className="empty-inline">Your Omi conversations will appear here after the first webhook arrives.</div>}
               </div>
               {analysisError && <div className="inline-error" role="alert">{analysisError}</div>}
@@ -508,7 +557,7 @@ function App() {
             </>}
             {active === 'Ask your memory' && <>
               <div className="alternate-heading"><div><span className="eyebrow">SEARCH EVERY CONVERSATION</span><h1>Ask your memory</h1><p>Answers are grounded in your own meeting snippets.</p></div></div>
-              <form className="ask-form alternate-ask-form" onSubmit={askMemory}><Icon name="search" size={18} /><label className="visually-hidden" htmlFor="section-question">Ask something from your meetings</label><input id="section-question" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ask anything from your meetings…" /><button aria-label="Ask OMIMIND" disabled={busy || !query.trim()}><Icon name="send" size={16} /></button></form>
+              <form className="ask-form alternate-ask-form" onSubmit={askMemory}><Icon name="search" size={18} /><label className="visually-hidden" htmlFor="section-question">Ask something from your meetings</label><input id="section-question" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ask anything from your meetings…" /><button aria-label="Ask OMIMIND" disabled={demoMode || busy || !query.trim()}><Icon name="send" size={16} /></button></form>
               <div className="suggestions alternate-suggestions"><span>TRY</span><button onClick={() => setQuery('What are my open action items?')}>My open action items</button><button onClick={() => setQuery('What did the team decide last week?')}>Decisions from last week</button><button onClick={() => setQuery('What did Maya say she would do?')}>What Maya committed to</button></div>
               {busy && <div className="answer-state"><span className="loader" /> Searching your meeting memory and asking Lyzr…</div>}{error && <div className="inline-error">{error}</div>}
               {answer && <div className="answer-result"><div className="answer-result-head"><span><Icon name="spark" size={14} /> GROUNDED ANSWER</span><small>{answer.provider === 'lyzr_studio_cloud' ? 'Lyzr' : answer.provider}</small></div><p>{answer.answer}</p><div className="answer-sources">Based on {answer.context.length} memory snippets</div></div>}
@@ -523,12 +572,25 @@ function App() {
       {showSettings && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowSettings(false); }}>
         <section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
           <div className="modal-head"><div><span className="eyebrow">{demoMode ? 'DEMO PREVIEW' : 'YOUR WORKSPACE'}</span><h2 id="settings-title">{demoMode ? 'Preview integrations' : 'Connect your meeting memory'}</h2></div><button className="icon-button" onClick={() => setShowSettings(false)} aria-label="Close settings"><Icon name="close" /></button></div>
-          <p className="modal-intro">{demoMode ? 'This workspace uses sample data. Sign in to connect your private meeting memory and configure Omi.' : 'Start the OMIMIND API, then point your Omi webhooks here. Your user ID keeps your meeting memories scoped to you.'}</p>
+          <p className="modal-intro">{demoMode ? 'This workspace uses sample data. Sign in to connect your private meeting memory and configure Omi.' : 'Connect Omi to send conversations into the private memory for this signed-in account.'}</p>
           {!demoMode && <><label className="field-label" htmlFor="uid">Verified workspace ID <span>from your signed-in account</span></label>
           <input id="uid" className="settings-input" value={uid} readOnly />
-          <p className="setup-hint">Use this ID in your Omi webhook URLs so incoming conversations are stored in this workspace.</p></>}
+          <p className="setup-hint">Omi webhook URLs below are signed for this workspace. Incoming conversations stay with this account even when other users sign in.</p>
+          <div className="webhook-setup">
+            <strong>Omi webhook URLs for this account</strong>
+            <p>Copy each URL into Omi → Developer Settings. Conversation Events and Real-time Transcript use separate URLs.</p>
+            {omiWebhookLoading && <small>Preparing secure URLs…</small>}
+            {omiWebhookError && <div className="inline-error" role="alert">{omiWebhookError}</div>}
+            {omiWebhookUrls && <>
+              <label htmlFor="omi-conversation-url">Conversation Events</label>
+              <div className="webhook-copy-row"><input id="omi-conversation-url" value={omiWebhookUrls.conversation} readOnly /><button onClick={() => void copyWebhookUrl(omiWebhookUrls.conversation, 'Conversation')}>Copy</button></div>
+              <label htmlFor="omi-realtime-url">Real-time Transcript</label>
+              <div className="webhook-copy-row"><input id="omi-realtime-url" value={omiWebhookUrls.realtime} readOnly /><button onClick={() => void copyWebhookUrl(omiWebhookUrls.realtime, 'Real-time transcript')}>Copy</button></div>
+              <small>These links are private credentials. Do not post or share them.</small>
+            </>}
+          </div></>}
           <div className="integration-list">
-            <div><span className="integration-mark omi-mark"><Icon name="mic" size={16}/></span><div><strong>Omi voice capture</strong><small>{health?.omi_configured ? 'Webhook token and workspace ID configured' : 'Set the webhook token and signed-in workspace ID'}</small></div><span className={health?.omi_configured ? 'integration-state on' : 'integration-state'}>{health?.omi_configured ? 'READY' : 'CONNECT'}</span></div>
+            <div><span className="integration-mark omi-mark"><Icon name="mic" size={16}/></span><div><strong>Omi voice capture</strong><small>{health?.omi_configured ? 'Per-account webhook signing is ready' : 'Configure the Omi webhook signing key on the backend'}</small></div><span className={health?.omi_configured ? 'integration-state on' : 'integration-state'}>{health?.omi_configured ? 'READY' : 'CONNECT'}</span></div>
             <div><span className="integration-mark qdrant-mark">Q</span><div><strong>Qdrant memory</strong><small>{health?.qdrant === 'connected' ? 'Vector store connected' : 'Waiting for API connection'}</small></div><span className={health?.qdrant === 'connected' ? 'integration-state on' : 'integration-state'}>{health?.qdrant === 'connected' ? 'READY' : 'CONNECT'}</span></div>
             <div><span className="integration-mark lyzr-mark"><Icon name="spark" size={16}/></span><div><strong>Lyzr reasoning</strong><small>{health?.lyzr_configured ? health.action_extractor_configured ? 'Credentials set for answers and action extraction' : 'Answer agent set; action extraction uses the manager' : 'Add your Lyzr agent credentials'}</small></div><span className={health?.lyzr_configured ? 'integration-state on' : 'integration-state'}>{health?.lyzr_configured ? 'CONFIGURED' : 'CONNECT'}</span></div>
           </div>

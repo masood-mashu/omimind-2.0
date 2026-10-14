@@ -1,34 +1,117 @@
 # OMIMIND
 
-**Meeting & Lecture Intelligence** — voice-first capture, searchable meeting memory, and grounded answers.
+**Private meeting memory for Omi.** OMIMIND turns conversations into searchable context, meeting summaries, decisions, and action items. Ask a question later and get an answer grounded in what was actually captured.
 
-OMIMIND receives Omi conversation webhooks or browser speech transcripts, embeds each spoken segment locally, persists user-scoped vectors in Qdrant, and retrieves relevant evidence before asking Lyzr to answer or analyze a meeting. The React dashboard shows meeting history, action items, and grounded memory context. Supabase Auth verifies the signed-in user before dashboard data is accessed.
+| | |
+|---|---|
+| **Live app** | [omimind-2-0-masood-mashus-projects.vercel.app](https://omimind-2-0-masood-mashus-projects.vercel.app/) |
+| **Source** | [masood-mashu/omimind-2.0](https://github.com/masood-mashu/omimind-2.0) |
+| **Hackathon** | [HiDevs: Stop Prompting, Solo Agents](https://app.hidevs.xyz/hackathons/stop-prompting-solo-agents-hackathon-2026) |
+
+## What it does
+
+Omi captures conversations. OMIMIND stores transcript segments as private vector memories, then retrieves relevant passages before asking Lyzr to answer or analyze a meeting. Supabase Auth identifies the signed-in account, and every Qdrant read and search is scoped to that account.
 
 ```mermaid
 flowchart LR
-    O[Omi app or device] -->|HTTPS transcript webhook| F[FastAPI]
-    M[Browser microphone] -->|Speech transcript| F
-    S[Supabase Auth] -->|Verified access token| F
-    F -->|FastEmbed, 384 dimensions| Q[(Qdrant)]
-    U[React dashboard] -->|Authenticated question or meeting analysis| F
-    F -->|user-scoped semantic search| Q
-    Q -->|meeting snippets| F
-    F -->|grounded recall or action extraction| L[Lyzr Studio agents]
-    L -->|answer, summary, decisions, actions| F
-    F --> U
+    O[Omi app] -->|Account-signed webhook| A[FastAPI backend]
+    B[Browser transcript] -->|Authenticated ingest| A
+    S[Supabase Auth] -->|Verify access token| A
+    A -->|Embed transcript segments| Q[(Qdrant)]
+    U[React dashboard] -->|Ask or analyze| A
+    A -->|Search current account only| Q
+    Q -->|Relevant meeting evidence| A
+    A -->|Grounded inference| L[Lyzr Studio]
+    L -->|Answer, summary, decisions, actions| A
+    A --> U
 ```
 
-## Start locally on Windows
+## Judge quick start
 
-Requirements: Python 3.10+, Node.js 20+, and a Lyzr Studio agent. Qdrant can run embedded on disk locally; Qdrant Cloud is recommended for a deployed demo. The first embedding request downloads `BAAI/bge-small-en-v1.5`.
+You can explore the interface without setting up any integrations, or create an account to test the live pipeline.
 
-1. Create `.env` from `.env.example` and set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `OMI_WEBHOOK_TOKEN`, `LYZR_API_KEY`, and `LYZR_AGENT_ID`. Supabase Auth must allow the user to sign in (and sign up if needed). The Lyzr ID and key are available from the agent's API details. Leave `QDRANT_URL` blank for local storage.
+### Option A: Explore the sample interface
+
+1. Open the [live app](https://omimind-2-0-masood-mashus-projects.vercel.app/).
+2. Choose **Explore the read-only demo**.
+3. Review the sample Overview, Meetings, Action Items, and Memory screens.
+
+The demo uses labeled sample data. It does not read or expose another account’s meetings, and its Lyzr Q&A and capture controls are disabled.
+
+### Option B: Test a real private workspace
+
+1. On the live app, create an account with an email address and password, then sign in.
+2. Open **Live capture**. Paste this sample transcript and choose **Save to meeting memory**:
+
+   > We decided to launch the beta on October 30. I will send the onboarding checklist by Thursday. If the support documents are not ready, we will delay customer invites.
+
+3. Open **Meetings** and select **Analyze with Lyzr**. Review the summary, decision, and extracted action item.
+4. Open **Ask your memory** and try:
+
+   - “When did we decide to launch the beta?”
+   - “What did I commit to sending, and by when?”
+   - “What condition could delay customer invites?”
+
+5. Ask something absent from the transcript, such as “What color was the office?” OMIMIND should say it could not find that information instead of inventing an answer.
+
+Each account starts with its own private memory. A new account will not contain another account’s conversations; capture or connect a conversation in that account before testing live recall.
+
+## Connect the Omi mobile app
+
+Omi sends webhooks without a Supabase sign-in token. OMIMIND therefore creates signed webhook URLs for the currently signed-in OMIMIND account. **Each person must use the URLs shown in their own OMIMIND Settings.** The server verifies the signature and routes the event to that account’s Qdrant memory. It does not use the browser’s current login to route a later webhook.
+
+1. Sign in to OMIMIND and open **Settings** using the account avatar or settings control.
+2. Under **Omi webhook URLs for this account**, copy the **Conversation Events** URL.
+3. In the Omi mobile app, open **Developer Settings → Webhooks**. Turn on **Conversation Events** and paste the copied URL into its **Endpoint URL** field.
+4. Copy the **Real-time Transcript** URL from OMIMIND and paste it into Omi’s **Real-time Transcript** endpoint field. Turn that webhook on too.
+5. Save the webhook settings in Omi, then record a short conversation. Check OMIMIND **Meetings** for the incoming conversation. Real-time transcript segments may appear while speaking; the completed conversation arrives when Omi finishes processing it.
+6. Once the meeting appears, use **Analyze with Lyzr** or ask a question under **Ask your memory**.
+
+Do not add a `uid` or `session_id` query string yourself. Omi appends its own webhook parameters. Keep each copied URL private: possession of a URL allows its holder to submit conversations to that account. If Omi is shared between evaluators, update the Omi endpoints to the URLs for the OMIMIND account being evaluated. If you do not have an Omi device available, use **Live capture** and paste a transcript instead.
+
+### What happens to another user’s memories?
+
+The webhook URL is signed for one Supabase user ID. The ID is covered by an HMAC signature, so changing the workspace ID invalidates the URL. Dashboard API requests independently verify the Supabase access token and apply that verified ID to Qdrant filters. Logging out and signing in as a different user changes the API identity and clears the previous user’s page state.
+
+`OMI_WEBHOOK_TOKEN` is the server-only signing key. Rotating it invalidates all generated Omi URLs; each account must copy its new URLs into Omi. `OMI_WEBHOOK_UID` is optional and only retained to support an older single-user webhook URL during migration.
+
+## Main screens
+
+- **Overview:** recent meetings, open action items, memory moments, and integration status.
+- **Meetings:** conversation archive and Lyzr meeting analysis.
+- **Action items:** commitments captured from Omi or extracted during analysis.
+- **Memory:** searchable transcript moments stored in Qdrant.
+- **Live capture:** browser speech recognition or paste-in transcript ingestion.
+- **Ask your memory:** semantic retrieval followed by a grounded Lyzr answer with supporting meeting context.
+- **Settings:** account-specific Omi URLs and Omi, Qdrant, and Lyzr connection status.
+
+## How answers stay grounded
+
+For a question, FastAPI embeds the query, searches Qdrant using the authenticated account’s `uid` filter, and sends the matching transcript passages to the configured Lyzr agent. The prompt tells Lyzr to answer only from supplied meeting context, cite the meeting or speaker, and say when the context does not contain the answer. If Lyzr is unavailable or unconfigured, the API returns an error instead of substituting a mock answer.
+
+Meeting analysis retrieves the selected meeting from the same account, asks Lyzr for a summary, decisions, and explicitly supported action items, then stores those results back under that account. Transcript contents are treated as untrusted data in the Lyzr instructions.
+
+## Run locally
+
+### Requirements
+
+- Python 3.10 or newer
+- Node.js 20 or newer
+- Supabase project with Auth enabled
+- Lyzr Studio API key and agent ID for live Q&A and analysis
+- Qdrant Cloud for persistent hosted data, or local embedded Qdrant for development
+
+The first embedding request downloads `BAAI/bge-small-en-v1.5` through FastEmbed.
+
+### Setup
+
+1. Copy the environment template and fill in the required values:
 
    ```powershell
    Copy-Item .env.example .env
    ```
 
-2. Install the backend and frontend dependencies.
+2. Install dependencies from the project root:
 
    ```powershell
    py -3.11 -m venv .venv
@@ -37,67 +120,106 @@ Requirements: Python 3.10+, Node.js 20+, and a Lyzr Studio agent. Qdrant can run
    npm install --prefix frontend
    ```
 
-3. Start the API from the project root.
+3. Start the FastAPI backend in one terminal:
 
    ```powershell
    uvicorn server.app:app --reload --port 8000
    ```
 
-4. In a second terminal, start the React dashboard.
+4. Start the React/Vite frontend in a second terminal:
 
    ```powershell
    npm run dev
    ```
 
-   Open the Vite URL printed in the terminal. The dashboard uses `/api` routes through the local Vite proxy.
+5. Open the Vite URL printed in the terminal. The development proxy forwards `/api` and `/health` requests to `http://127.0.0.1:8000`.
 
-## Connect Omi
+Leave `QDRANT_URL` blank to use local storage at `QDRANT_PATH`. Local Qdrant data is for development; use Qdrant Cloud for deployed workspaces so memories survive instance replacement.
 
-Sign in to OMIMIND and copy the **Verified workspace ID** from Settings. Set `OMI_WEBHOOK_UID` to that ID and restart the backend. Expose port 8000 with an HTTPS tunnel, then configure these webhook URLs in the Omi app's Developer Mode, replacing the token and workspace ID:
+## Configuration
 
-- Completed conversation: `https://YOUR-TUNNEL/api/omi/conversation/YOUR_OMI_WEBHOOK_TOKEN?uid=YOUR_WORKSPACE_ID`
-- Realtime transcript: `https://YOUR-TUNNEL/api/omi/realtime/YOUR_OMI_WEBHOOK_TOKEN?uid=YOUR_WORKSPACE_ID&session_id=YOUR_SESSION_ID`
+Set these values in the backend environment. Never put Lyzr, Qdrant, or Omi signing secrets in the Vercel frontend environment.
 
-The token must exactly match `OMI_WEBHOOK_TOKEN`, and the URL's `uid` must match `OMI_WEBHOOK_UID`. Dashboard API routes derive the workspace ID from a Supabase-verified bearer token; caller-supplied IDs are no longer accepted for reads or questions. The backend accepts Omi's `transcript_segments` (including `speaker_name`) and `structured.action_items` (including `due_at` and `completed`), plus `segments`, `transcript`, and `text` fallbacks. Omi's webhook settings vary by app version; inspect a sample payload on webhook.site if the field names differ.
+| Variable | Required | Purpose |
+|---|---:|---|
+| `SUPABASE_URL` | Yes | Supabase project URL used to verify sign-in sessions. |
+| `SUPABASE_PUBLISHABLE_KEY` | Yes | Browser-safe Supabase Auth API key. Do not use a service-role key in the browser. |
+| `OMI_WEBHOOK_TOKEN` | Yes for Omi | Long random server-only HMAC signing key for per-account Omi URLs. |
+| `OMI_WEBHOOK_UID` | No | Legacy single-account webhook routing only. New Settings URLs do not use it. |
+| `LYZR_API_KEY` | Yes for AI | Server-side key for Lyzr Studio inference. |
+| `LYZR_AGENT_ID` | Yes for AI | Primary Lyzr agent ID used for grounded answers and analysis. |
+| `LYZR_ACTION_EXTRACTOR_AGENT_ID` | No | Optional dedicated action-extraction agent. |
+| `LYZR_MANAGED_AGENTS` | No | Optional JSON array of manager sub-agents; each entry has `id`, `name`, and `usage_description`. |
+| `QDRANT_URL` | For hosted data | Qdrant Cloud cluster URL. Leave blank for local embedded Qdrant. |
+| `QDRANT_API_KEY` | For Qdrant Cloud | Qdrant Cloud API key. |
+| `QDRANT_COLLECTION` | No | Collection name; defaults to `omimind_meetings`. |
+| `ALLOWED_ORIGINS` | For split hosting | Comma-separated frontend origins allowed by backend CORS. Include the exact Vercel URL. |
 
-The webhook token is in the endpoint path so Omi can call it without custom headers. Treat the webhook URL as a secret and rotate the token if it is exposed.
-
-## Ask a question
-
-The API retrieves matching snippets for the same Omi user ID and passes those snippets and the question to Lyzr. Answers explicitly fail if Lyzr is not configured or unavailable; local preview content is never returned as a Lyzr answer.
-
-```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8000/api/ask `
-  -ContentType 'application/json' `
-  -Headers @{ Authorization = 'Bearer YOUR_SUPABASE_ACCESS_TOKEN' } `
-  -Body '{"question":"What action items did we agree on?"}'
-```
-
-Useful endpoints: public `GET /health` and `GET /api/auth/config`; authenticated `GET /api/me`, `GET /api/meetings`, `GET /api/memories`, `GET /api/actions`, `POST /api/ingest`, `POST /api/analyze`, and `POST /api/ask`.
+Optional tuning variables and defaults are listed in [.env.example](.env.example).
 
 ## Deploy
 
-### Replit
+The current deployment layout separates the React frontend from the FastAPI backend. Omi webhooks must target the **public HTTPS backend URL**, not the frontend URL.
 
-The project includes `.replit` to build the React app and run FastAPI as one service. Add `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `OMI_WEBHOOK_TOKEN`, `OMI_WEBHOOK_UID`, `LYZR_API_KEY`, `LYZR_AGENT_ID`, `LYZR_ACTION_EXTRACTOR_AGENT_ID`, `LYZR_MANAGED_AGENTS`, `QDRANT_URL`, and `QDRANT_API_KEY` in Replit's Secrets panel. For a Lyzr Manager Agent, set `LYZR_AGENT_ID` to the manager and `LYZR_MANAGED_AGENTS` to a JSON array of its sub-agents (`id`, `name`, `usage_description`); the backend includes these with inference requests so the manager can delegate. Use Qdrant Cloud for durable memory; local embedded Qdrant data may be lost when a deployment is replaced. Set `ALLOWED_ORIGINS` to the public app URL if the UI is hosted separately.
+### Backend on Replit
 
-### Vercel frontend + Replit backend
+1. Import the repository into Replit and use the included `.replit` deployment configuration.
+2. Add the required backend variables from the table above in **Secrets**. Use Qdrant Cloud for durable deployed memory.
+3. Set `ALLOWED_ORIGINS` to the exact deployed frontend origin, such as `https://your-project.vercel.app`.
+4. Deploy/restart the backend and check `https://YOUR_BACKEND_HOST/health`. Confirm `status` is `ok`, `qdrant` is `connected`, and `auth_configured` and `lyzr_configured` are true. `omi_configured` should be true when `OMI_WEBHOOK_TOKEN` is set.
 
-Import this repository into Vercel with the **Root Directory** set to `frontend`. Set `VITE_API_BASE_URL` to the deployed Replit API base URL. Add that exact Vercel origin to the backend's `ALLOWED_ORIGINS`. Keep Lyzr and Qdrant secrets in the backend only. Vercel hosts the React UI; it does not host this FastAPI/Qdrant service through the included static Vite config.
+### Frontend on Vercel
 
-## Current scope
+1. Import the repository into Vercel with **Root Directory** set to `frontend`.
+2. Set the Vercel environment variable `VITE_API_BASE_URL` to the public backend origin, for example `https://YOUR_BACKEND_HOST` (no trailing slash).
+3. Deploy the frontend. Open the app, sign in, and check that Settings reports the backend integrations as ready.
+4. Copy the account-specific Omi URLs from Settings into the Omi mobile app as described above.
 
-- Omi completed and realtime transcript ingestion, bound to the configured workspace ID.
-- Browser speech capture and authenticated transcript ingestion.
-- Persistent Qdrant vectors with user-scoped retrieval.
-- Supabase Auth sign-in and server-verified workspace identity.
-- Lyzr-grounded memory Q&A plus meeting summaries, decisions, and action extraction.
-- Omi structured and Lyzr-extracted action items in the React dashboard.
-- Sample preview data is labeled in the UI and is not sent as real memory.
-- A read-only demo workspace lets reviewers explore sample screens without creating an account; live capture and private-memory queries still require sign-in.
+Vite embeds `VITE_API_BASE_URL` at build time. Redeploy the frontend after changing that variable. Redeploy the backend after changing backend secrets or code.
 
-The dashboard's completion toggles are currently browser-local. Dashboard reads and questions require Supabase Auth; Omi ingestion is bound to one configured workspace ID and a private token. Browser speech recognition may be processed by the browser's speech service.
+## API reference
 
-## Hackathon timing
+| Route | Access | Purpose |
+|---|---|---|
+| `GET /health` | Public | Service and integration configuration status; does not return secret values. |
+| `GET /api/auth/config` | Public | Browser-safe Supabase URL and publishable key. |
+| `GET /api/me` | Signed in | Return the verified Supabase user ID. |
+| `GET /api/omi/webhook-config` | Signed in | Return Omi paths signed for the current account. |
+| `POST /api/omi/conversation/{token}` | Omi signed URL | Ingest a completed Omi conversation. |
+| `POST /api/omi/realtime/{token}` | Omi signed URL | Ingest Omi real-time transcript segments. |
+| `GET /api/meetings` | Signed in | List this account’s meetings. |
+| `GET /api/memories` | Signed in | List this account’s transcript moments. |
+| `GET /api/actions` | Signed in | List this account’s action items. |
+| `POST /api/ingest` | Signed in | Save a pasted or browser-captured transcript. |
+| `POST /api/analyze` | Signed in | Analyze one of this account’s meetings with Lyzr. |
+| `POST /api/ask` | Signed in | Search this account’s Qdrant memory and ask Lyzr. |
 
-The user reports the active submission portal deadline is **8:00 PM IST on 14 October 2026**. The public event listing may still show the earlier timeline, so follow the active portal status and retain its confirmation.
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Sign-in or account creation fails | Confirm Supabase Auth is enabled and `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` are set on the backend. |
+| Settings says Omi is not ready | Set `OMI_WEBHOOK_TOKEN` in the backend Secrets and redeploy/restart the backend. |
+| Omi conversation does not appear | Check both Omi webhook toggles, confirm each endpoint is the URL copied from the currently signed-in OMIMIND account, and verify Omi can reach the public HTTPS backend. |
+| Meetings appear but Ask/Analyze fails | Check `LYZR_API_KEY`, `LYZR_AGENT_ID`, backend logs, and the Lyzr agent’s availability. |
+| Qdrant reports not ready | Check `QDRANT_URL` and `QDRANT_API_KEY`, or confirm local disk storage is writable for development. |
+| Browser requests fail only on the deployed frontend | Confirm `VITE_API_BASE_URL` is the backend origin and that the frontend origin is included in backend `ALLOWED_ORIGINS`. Then redeploy the frontend. |
+
+## Privacy and current limitations
+
+- Supabase access tokens are verified by the backend before user-specific API access. The server derives the Qdrant filter UID from the verified account, not a caller-supplied query parameter.
+- Omi webhooks use account-bound signed URLs because Omi calls the backend without the user’s browser session. Each OMIMIND account must configure its own URLs in Omi.
+- The read-only demo is sample content. It is separate from private Qdrant memories.
+- Browser speech recognition may use the browser’s speech service. OMIMIND stores the resulting transcript, not browser microphone audio.
+- Action-item completion toggles are saved in the current browser, scoped to the signed-in account; they are not yet synchronized across devices.
+- Local embedded Qdrant storage may be ephemeral on hosted platforms. Use Qdrant Cloud for a persistent evaluation deployment.
+
+## Project structure
+
+```text
+server/                 FastAPI routes, Supabase auth verification, Qdrant, and Lyzr calls
+frontend/src/            React dashboard and browser API client
+frontend/vite.config.ts  Local API proxy
+.env.example             Backend configuration template
+.replit                  Replit build and deployment commands
+```

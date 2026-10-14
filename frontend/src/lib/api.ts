@@ -45,6 +45,7 @@ export type AskResult = {
 
 export type IngestResult = { status: string; session_id: string; stored: number };
 export type MeetingAnalysis = { summary: string; decisions: string[]; action_items: Array<{ description: string; owner: string | null; due_date: string | null; priority: string | null; quote: string | null }> };
+export type OmiWebhookUrls = { conversation: string; realtime: string };
 
 const apiBase = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? '';
 
@@ -81,6 +82,14 @@ export const api = {
     request<MeetingAnalysis>('/api/analyze', { method: 'POST', body: JSON.stringify({ session_id }) }),
   ask: (question: string) =>
     request<AskResult>('/api/ask', { method: 'POST', body: JSON.stringify({ question }) }),
+  omiWebhookUrls: async (): Promise<OmiWebhookUrls> => {
+    const paths = await request<{ conversation_path: string; realtime_path: string }>('/api/omi/webhook-config');
+    const base = apiBase || window.location.origin;
+    return {
+      conversation: `${base}${paths.conversation_path}`,
+      realtime: `${base}${paths.realtime_path}`,
+    };
+  },
 };
 
 export function shortDate(timestamp: number): string {

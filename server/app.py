@@ -124,15 +124,41 @@ def _embed(text: str) -> list[float]:
     return vector
 
 
-def _verify_webhook(token: str, uid: str) -> None:
-    if not OMI_TOKEN or not hmac.compare_digest(token, OMI_TOKEN):
-        logger.warning("Rejected Omi webhook with invalid token")
-        raise HTTPException(status_code=401, detail="Invalid Omi webhook token")
-    expected_uid = os.getenv("OMI_WEBHOOK_UID", "").strip()
-    if not expected_uid:
-        raise HTTPException(status_code=503, detail="Set OMI_WEBHOOK_UID to the authenticated workspace ID")
-    if not hmac.compare_digest(uid, expected_uid):
-        raise HTTPException(status_code=403, detail="This Omi webhook is not linked to that workspace")
+def _verify_webhook(token: str) -> str:
+    if not OMI_TOKEN:
+        raise HTTPException(status_code=503, detail="Omi webhook signing is not configured")
+
+    # New links are signed for the Supabase-verified workspace UID. The UID is
+    # public identity data; the HMAC makes it impossible to change the target.
+    parts = token.split(".", 2)
+    if len(parts) == 3 and parts[0] == "v1":
+        _, workspace_uid, signature = parts
+        try:
+            canonical_uid = str(uuid.UUID(workspace_uid))
+        except (ValueError, AttributeError):
+            canonical_uid = ""
+        expected = _webhook_signature(canonical_uid) if canonical_uid else ""
+        if canonical_uid and canonical_uid == workspace_uid and hmac.compare_digest(signature, expected):
+            return canonical_uid
+
+    # Keep existing single-owner Omi URLs working while users replace them
+    # with their account-specific links from Settings.
+    if hmac.compare_digest(token, OMI_TOKEN):
+        workspace_uid = os.getenv("OMI_WEBHOOK_UID", "").strip()
+        if workspace_uid:
+            return workspace_uid
+    logger.warning("Rejected Omi webhook with invalid token")
+    raise HTTPException(status_code=401, detail="Invalid Omi webhook token")
+
+
+def _webhook_signature(uid: str) -> str:
+    message = f"omimind:omi-webhook:v1:{uid}".encode("utf-8")
+    return hmac.new(OMI_TOKEN.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def _webhook_token(uid: str) -> str:
+    canonical_uid = str(uuid.UUID(uid))
+    return f"v1.{canonical_uid}.{_webhook_signature(canonical_uid)}"
 
 
 def _normalize_payload(payload: Any) -> tuple[str | None, list[dict[str, Any]]]:
@@ -279,7 +305,7 @@ def health():
         "qdrant": "connected" if QDRANT is not None else "not_ready",
         "collection": COLLECTION,
         "lyzr_configured": bool(os.getenv("LYZR_API_KEY") and os.getenv("LYZR_AGENT_ID")),
-        "omi_configured": bool(OMI_TOKEN and os.getenv("OMI_WEBHOOK_UID")),
+        "omi_configured": bool(OMI_TOKEN),
         "action_extractor_configured": bool(os.getenv("LYZR_ACTION_EXTRACTOR_AGENT_ID")),
         "auth_configured": bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_PUBLISHABLE_KEY")),
     }
@@ -297,6 +323,18 @@ def auth_config():
 @app.get("/api/me")
 def current_user(uid: str = Depends(require_user_id)):
     return {"uid": uid}
+
+
+@app.get("/api/omi/webhook-config")
+def omi_webhook_config(uid: str = Depends(require_user_id)):
+    """Create stable Omi endpoint paths bound to the authenticated account."""
+    if not OMI_TOKEN:
+        raise HTTPException(status_code=503, detail="Omi webhook signing is not configured")
+    token = _webhook_token(uid)
+    return {
+        "conversation_path": f"/api/omi/conversation/{token}",
+        "realtime_path": f"/api/omi/realtime/{token}",
+    }
 
 
 @app.get("/api/meetings")
@@ -431,16 +469,16 @@ def analyze_meeting(body: AnalyzeRequest, uid: str = Depends(require_user_id)):
 
 
 @app.post("/api/omi/conversation/{token}", status_code=202)
-def omi_conversation(token: str, uid: str = Query(min_length=1, max_length=200), payload: Any = Body(...)):
-    _verify_webhook(token, uid)
+def omi_conversation(token: str, omi_uid: str = Query(min_length=1, max_length=200, alias="uid"), payload: Any = Body(...)):
+    workspace_uid = _verify_webhook(token)
     title, segments = _normalize_payload(payload)
     if not segments:
         raise HTTPException(status_code=422, detail="No transcript text found in Omi payload")
     event_id = None
     if isinstance(payload, dict):
         event_id = payload.get("session_id") or payload.get("conversation_id") or payload.get("id")
-    session_id = str(event_id) if event_id else hashlib.sha256(f"{uid}\x1f{payload!r}".encode()).hexdigest()[:32]
-    stored = _store(uid, session_id, title or "Untitled meeting", segments, "omi_conversation")
+    session_id = str(event_id) if event_id else hashlib.sha256(f"{workspace_uid}\x1f{payload!r}".encode()).hexdigest()[:32]
+    stored = _store(workspace_uid, session_id, title or "Untitled meeting", segments, "omi_conversation")
     logger.info("Omi conversation persisted session=%s points=%s", session_id, stored)
     return {"status": "accepted", "session_id": session_id, "stored": stored}
 
@@ -448,15 +486,15 @@ def omi_conversation(token: str, uid: str = Query(min_length=1, max_length=200),
 @app.post("/api/omi/realtime/{token}", status_code=202)
 def omi_realtime(
     token: str,
-    uid: str = Query(min_length=1, max_length=200),
+    omi_uid: str = Query(min_length=1, max_length=200, alias="uid"),
     session_id: str = Query(min_length=1, max_length=200),
     payload: Any = Body(...),
 ):
-    _verify_webhook(token, uid)
+    workspace_uid = _verify_webhook(token)
     _, segments = _normalize_payload(payload)
     if not segments:
         return {"status": "accepted", "session_id": session_id, "stored": 0}
-    stored = _store(uid, session_id, "Live Omi conversation", segments, "omi_realtime")
+    stored = _store(workspace_uid, session_id, "Live Omi conversation", segments, "omi_realtime")
     logger.info("Omi realtime persisted session=%s points=%s", session_id, stored)
     return {"status": "accepted", "session_id": session_id, "stored": stored}
 
