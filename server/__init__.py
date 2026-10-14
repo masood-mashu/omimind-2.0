@@ -1,0 +1,1 @@
+"""OMIMIND API service."""
